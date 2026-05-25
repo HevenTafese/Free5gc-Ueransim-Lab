@@ -1,10 +1,5 @@
 # 5G Core Network Simulation on Local VMs
 
-free5GC v4.2.2 + UERANSIM v3.2.6 · Ubuntu 22.04 · VirtualBox · End-to-End GTP Tunnel Verified
-
----
-
-## Why This Exists
 
 Most existing guides for free5GC and UERANSIM begin at the software installation step. They assume you already have a configured Linux environment, correctly networked virtual machines, and a working understanding of how the components relate to each other. In practice, that assumption breaks most attempts before they start.
 
