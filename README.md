@@ -1,21 +1,40 @@
 # 5G Core Network Simulation on Local VMs
-### free5GC + UERANSIM · Ubuntu 22.04 · VirtualBox · End-to-End GTP Tunnel Verified
+
+free5GC v4.2.2 + UERANSIM v3.2.6 · Ubuntu 22.04 · VirtualBox · End-to-End GTP Tunnel Verified
 
 ---
 
 ## Why This Exists
 
-Most existing guides for free5GC and UERANSIM begin at the software installation step — they assume you already have a configured Linux environment, correctly networked VMs, and a working understanding of how the components relate to each other. In practice, that assumption breaks most attempts before they start.
+Most existing guides for free5GC and UERANSIM begin at the software installation step. They assume you already have a configured Linux environment, correctly networked virtual machines, and a working understanding of how the components relate to each other. In practice, that assumption breaks most attempts before they start.
 
-This repository documents a complete, working implementation of a 5G Core Network simulation built from scratch: from hypervisor configuration and VM provisioning through to a verified GTP-U tunnel with confirmed end-to-end internet connectivity through the simulated UE. Every configuration error encountered during the process is recorded, with the root cause and resolution explained. This is not a polished ideal-path tutorial — it is an honest account of how the system was built, what broke, and why.
+This repository documents a complete working implementation built from scratch: from hypervisor configuration and VM provisioning through to a verified GTP-U tunnel with confirmed end-to-end internet connectivity through the simulated UE. Every configuration error encountered during the process is recorded with the root cause and resolution explained. This is not a polished ideal-path tutorial. It is an honest account of how the system was built, what broke, and why.
 
-The goal is that someone with no prior free5GC experience can follow this from a blank machine and reach a working state without having to cross-reference six different sources.
+The goal is that someone with no prior free5GC experience can follow this from a blank machine and reach a working state without cross-referencing six different sources.
 
 ---
 
-## Architecture Overview
+## End Result
 
-This simulation implements a split deployment across two virtual machines, mirroring the logical separation between the **5G Core Network (5GC)** and the **Radio Access Network (RAN)** in a real deployment.
+These are the actual outputs from this implementation.
+
+**gNB connected to free5GC core:**
+
+![gNB Connected](img/gnb-connected.png)
+
+**UE registered and GTP tunnel up:**
+
+![UE Registered](img/ue-registered.png)
+
+**End-to-end ping through the simulated 5G network:**
+
+![Ping Success](img/ping-success.png)
+
+---
+
+## Architecture
+
+The simulation runs across two virtual machines, mirroring the logical separation between the 5G Core Network and the Radio Access Network in a real deployment.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -44,83 +63,82 @@ This simulation implements a split deployment across two virtual machines, mirro
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Network Interfaces:**
 | Interface | VM | Purpose |
 |---|---|---|
-| `enp0s3` (NAT) | Both | Internet access for package installation |
-| `enp0s8` (Host-Only) | Both | Inter-VM communication (N2/N3 interfaces) |
+| `enp0s3` NAT | Both | Internet access for package installation |
+| `enp0s8` Host-Only | Both | Inter-VM communication over N2 and N3 interfaces |
 
-**Key 5G Component Mapping:**
-| Component | Role | Analogy |
+Each 5G Network Function has a specific role. The table below maps what each one does in the context of this simulation.
+
+| Component | Role | In Plain Terms |
 |---|---|---|
-| NRF | Network Repository — all NFs register here | Directory service |
-| AMF | Access and Mobility Management — handles UE registration | Reception / authentication desk |
-| SMF | Session Management — establishes PDU sessions | Session coordinator |
-| UPF | User Plane Function — routes actual data traffic | The router to the internet |
-| UDM | Unified Data Management — subscriber database | HR records |
-| AUSF | Authentication Server — cryptographic validation | Security verification |
-| gNB (UERANSIM) | Simulated 5G base station | Cell tower |
-| UE (UERANSIM) | Simulated 5G device | Mobile phone |
+| NRF | Network Repository Function | Every other NF registers here on startup. Acts as a directory. |
+| AMF | Access and Mobility Management | Handles UE registration and authentication. The front door. |
+| SMF | Session Management Function | Establishes and manages PDU sessions. Coordinates data paths. |
+| UPF | User Plane Function | Routes actual user traffic. The component that touches the internet. |
+| UDM | Unified Data Management | Subscriber database. Stores credentials and profiles. |
+| AUSF | Authentication Server Function | Handles cryptographic authentication challenges. |
+| gNB | Simulated base station (UERANSIM) | The cell tower in this simulation. |
+| UE | Simulated device (UERANSIM) | The mobile phone in this simulation. |
 
 ---
 
 ## Prerequisites
 
-**Host machine requirements:**
-- VirtualBox 6.1 or later
-- Ubuntu 22.04 Desktop ISO (downloaded prior to setup)
-- Minimum 8 GB RAM available for VMs (4 GB per VM)
-- Minimum 40 GB free disk space
+Before starting, the following must be in place on the host machine.
 
-**Software versions used in this implementation:**
-- free5GC: v4.2.2
-- UERANSIM: v3.2.6 (commit `85a0fbf`)
-- Go: 1.21.8
-- gtp5g kernel module: v0.9.14
-- MongoDB: 8.0 (community edition)
-- Node.js: 20.x
+| Requirement | Version |
+|---|---|
+| VirtualBox | 6.1 or later |
+| Ubuntu 22.04 Desktop ISO | Downloaded before setup |
+| RAM available for VMs | 8 GB minimum (4 GB per VM) |
+| Free disk space | 40 GB minimum |
+
+Software versions used in this implementation:
+
+| Software | Version |
+|---|---|
+| free5GC | v4.2.2 |
+| UERANSIM | v3.2.6 (commit `85a0fbf`) |
+| Go | 1.21.8 |
+| gtp5g kernel module | v0.9.14 |
+| MongoDB | 8.0 community edition |
+| Node.js | 20.x |
 
 ---
 
-## Part 1 — VM Provisioning
+## Part 1: VM Provisioning
 
-Both VMs are created with the same base configuration. The critical requirement is **Skip Unattended Installation** during VM creation — unattended mode creates a locked-down user without sudo access which prevents all subsequent steps.
+Both VMs are created with the same base configuration. The critical requirement during VM creation is ticking **Skip Unattended Installation**. Unattended mode creates a locked-down user account without sudo access, which blocks every subsequent step.
 
-### VM 1: free5GC
+**VM 1 settings in VirtualBox:**
 
-**VirtualBox settings:**
-- Name: `free5gc`
-- ISO: Ubuntu 22.04 Desktop
-- ✅ Skip Unattended Installation
-- RAM: 4096 MB, CPUs: 2
-- Disk: 20 GB
+| Setting | Value |
+|---|---|
+| Name | `free5gc` |
+| ISO | Ubuntu 22.04 Desktop |
+| Skip Unattended Installation | Yes |
+| RAM | 4096 MB |
+| CPUs | 2 |
+| Disk | 20 GB |
 
-**Network adapters:**
-- Adapter 1: NAT (leave default)
-- Adapter 2: Host-only Adapter → `VirtualBox Host-Only Ethernet Adapter`
+Network adapters: Adapter 1 as NAT (leave default), Adapter 2 as Host-only Adapter pointing to VirtualBox Host-Only Ethernet Adapter.
 
-**During Ubuntu installation:**
-- Installation type: Minimal
-- Username: `vboxuser` (or your choice)
-- Hostname: `free5gc`
+During Ubuntu installation set the hostname to `free5gc`, choose Minimal Installation, and set a username and password you will remember.
 
-### VM 2: UERANSIM
-
-Same hardware configuration, with:
-- Name: `ueransim`
-- Hostname: `ueransim`
+**VM 2** follows the same settings with name `ueransim` and hostname `ueransim`.
 
 ### Static IP Configuration
 
-After Ubuntu installation, both VMs need static IPs on the host-only adapter. Adapter `enp0s8` will have no IPv4 address by default.
+After Ubuntu installation both VMs need static IPs on the host-only adapter. The `enp0s8` interface will have no IPv4 address by default.
 
-**On VM 1 (free5GC):**
+On VM 1 (free5GC):
 
 ```bash
 sudo nano /etc/netplan/01-network-manager-all.yaml
 ```
 
-Replace contents with:
+Replace the contents with:
 
 ```yaml
 network:
@@ -139,9 +157,9 @@ sudo chmod 600 /etc/netplan/01-network-manager-all.yaml
 sudo netplan apply
 ```
 
-**On VM 2 (UERANSIM):** Same process, with address `192.168.56.102/24`.
+On VM 2 (UERANSIM) follow the same process with address `192.168.56.102/24`.
 
-**Verify connectivity:**
+Verify both VMs can reach each other before proceeding:
 
 ```bash
 # From UERANSIM VM
@@ -151,13 +169,13 @@ ping 192.168.56.101
 ping 192.168.56.102
 ```
 
-Both must respond before proceeding.
+Both must respond before moving on.
 
 ---
 
-## Part 2 — free5GC Installation
+## Part 2: free5GC Installation
 
-All commands in this section are run on **VM 1 (free5GC)**.
+All commands in this section run on VM 1 (free5GC).
 
 ### System Update
 
@@ -166,15 +184,17 @@ sudo apt -y update
 sudo apt -y install wget git
 ```
 
-### Verify AVX Support (Required for MongoDB)
+### Verify AVX Support
+
+MongoDB 8.0 requires AVX instruction support. Run this before installing it:
 
 ```bash
 lscpu | grep avx
 ```
 
-Output must contain `avx`. MongoDB 8.0 requires AVX instruction support. If no output is returned, install MongoDB 4.4 instead.
+The output must contain `avx`. If nothing is returned, install MongoDB 4.4 instead.
 
-### MongoDB Installation
+### MongoDB
 
 ```bash
 sudo apt install -y gnupg curl
@@ -194,7 +214,7 @@ sudo systemctl enable mongod
 sudo systemctl status mongod
 ```
 
-Expected: `Active: active (running)`
+Expected output contains `Active: active (running)`.
 
 ### Build Dependencies
 
@@ -202,7 +222,7 @@ Expected: `Active: active (running)`
 sudo apt -y install git gcc g++ cmake autoconf libtool pkg-config libmnl-dev libyaml-dev
 ```
 
-### Go Installation
+### Go
 
 ```bash
 wget https://dl.google.com/go/go1.21.8.linux-amd64.tar.gz
@@ -225,7 +245,7 @@ go version
 
 ### gtp5g Kernel Module
 
-The GTP-U kernel module is required for the UPF to handle 5G data plane traffic.
+The GTP-U kernel module is what allows the UPF to handle 5G data plane traffic. Without it the tunnel interface will appear to come up but no traffic will pass through it.
 
 ```bash
 git clone -b v0.9.14 https://github.com/free5gc/gtp5g.git
@@ -243,7 +263,7 @@ cd free5gc
 make
 ```
 
-Build time is approximately 5–15 minutes depending on hardware.
+Build time is approximately 5 to 15 minutes depending on hardware. Do not interrupt it.
 
 ### WebConsole
 
@@ -259,30 +279,26 @@ make webconsole
 
 ---
 
-## Part 3 — free5GC Configuration
+## Part 3: free5GC Configuration
 
-The default free5GC configuration binds all interfaces to loopback addresses (`127.0.0.x`). For inter-VM communication over the host-only network, three configuration files must be updated to use `192.168.56.101`.
+The default free5GC configuration binds all interfaces to loopback addresses (`127.0.0.x`). Three configuration files must be updated to use `192.168.56.101` for inter-VM communication to work.
 
-### AMF Configuration
+### AMF
 
 ```bash
 nano ~/free5gc/config/amfcfg.yaml
 ```
-
-Locate and update:
 
 ```yaml
 ngapIpList:
   - 192.168.56.101   # was 127.0.0.1
 ```
 
-### SMF Configuration
+### SMF
 
 ```bash
 nano ~/free5gc/config/smfcfg.yaml
 ```
-
-Locate and update:
 
 ```yaml
 interfaces:
@@ -291,13 +307,13 @@ interfaces:
       - 192.168.56.101   # was 127.0.0.8
 ```
 
-### UPF Configuration
+### UPF
 
 ```bash
 nano ~/free5gc/config/upfcfg.yaml
 ```
 
-Three fields require updating:
+Three fields require updating in this file:
 
 ```yaml
 pfcp:
@@ -310,30 +326,24 @@ gtpu:
       type: N3
 ```
 
-### Network Rules (IP Forwarding and NAT)
+### Network Rules
 
-These rules enable the UPF to forward UE traffic to the internet via `enp0s3`. The `ufw` disable is permanent; the iptables rules must be reapplied after each reboot using the provided script.
+The following script enables IP forwarding and sets up NAT so the UPF can forward UE traffic out to the internet via `enp0s3`. The `ufw` disable is permanent across reboots. The iptables rules are not and must be reapplied each session.
 
 ```bash
 sudo systemctl stop ufw
 sudo systemctl disable ufw
 ```
 
-For each session (or after reboot):
+Run this before starting free5GC in every session:
 
 ```bash
 sudo ~/free5gc/reload_host_config.sh enp0s3
 ```
 
-This script applies:
-- `net.ipv4.ip_forward=1`
-- MASQUERADE rule on `enp0s3`
-- TCP MSS clamping
-- FORWARD chain accept rule
-
 ---
 
-## Part 4 — Subscriber Provisioning (WebConsole)
+## Part 4: Subscriber Provisioning
 
 Start the WebConsole:
 
@@ -342,9 +352,9 @@ cd ~/free5gc/webconsole
 ./bin/webconsole
 ```
 
-Navigate to `http://192.168.56.101:5000` from the host machine. Login: `admin` / `free5gc`.
+Navigate to `http://192.168.56.101:5000` from the host machine and log in with `admin` / `free5gc`.
 
-**Add subscriber with the following values:**
+Go to Subscribers and create a new subscriber with these exact values:
 
 | Field | Value |
 |---|---|
@@ -352,20 +362,28 @@ Navigate to `http://192.168.56.101:5000` from the host machine. Login: `admin` /
 | MCC | `208` |
 | MNC | `93` |
 | Authentication Method | `5G_AKA` |
-| Operator Code Type | **`OP`** (not OPc — this is the most common misconfiguration) |
+| Operator Code Type | `OP` (not OPc) |
 | Operator Code | `8e27b6af0e692e750f32667a3b14605d` |
 | Key | `8baf473f2f8fd09487cccbd7097c6862` |
 | SQN | `000000000000` |
 
-> **Important:** The `Operator Code Type` field defaults to `OPc`. It must be changed to `OP`. free5GC will derive and store the OPc internally. If left as OPc and the pre-computed OPc value does not match what free5GC derives from the OP, authentication will fail with `MAC_FAILURE` — see Troubleshooting section.
+The Operator Code Type field defaults to OPc. It must be changed to OP before submitting. free5GC will derive and store the OPc value internally. If this is left as OPc and the pre-computed value does not match what free5GC derives from the OP, authentication will fail with MAC_FAILURE. See the troubleshooting section for how to recover from this.
 
-Stop the WebConsole after saving: `Ctrl+C`.
+Stop the WebConsole after saving with `Ctrl+C`.
+
+After creating the subscriber, retrieve the internally derived OPc value from MongoDB. You will need this for the UERANSIM configuration:
+
+```bash
+mongosh free5gc --eval "db['subscriptionData.authenticationData.authenticationSubscription'].find().pretty()"
+```
+
+Note the `encOpcKey` value from the output.
 
 ---
 
-## Part 5 — UERANSIM Installation
+## Part 5: UERANSIM Installation
 
-All commands in this section are run on **VM 2 (UERANSIM)**.
+All commands in this section run on VM 2 (UERANSIM).
 
 ```bash
 sudo apt update && sudo apt upgrade -y
@@ -385,14 +403,12 @@ make
 nano ~/UERANSIM/config/free5gc-gnb.yaml
 ```
 
-Update:
-
 ```yaml
-ngapIp: 192.168.56.102   # this VM's IP
-gtpIp: 192.168.56.102    # this VM's IP
+ngapIp: 192.168.56.102
+gtpIp: 192.168.56.102
 
 amfConfigs:
-  - address: 192.168.56.101   # free5GC VM IP
+  - address: 192.168.56.101
 ```
 
 ### UE Configuration
@@ -401,30 +417,24 @@ amfConfigs:
 nano ~/UERANSIM/config/free5gc-ue.yaml
 ```
 
-Verify these values match the WebConsole subscriber exactly:
-
 ```yaml
 supi: 'imsi-208930000000003'
 mcc: '208'
 mnc: '93'
 key: '8baf473f2f8fd09487cccbd7097c6862'
-op: '8e27b6af0e692e750f32667a3b14605d'
-opType: 'OPC'   # use the derived OPc value from MongoDB
+op: '<encOpcKey value from MongoDB>'
+opType: 'OPC'
 ```
 
-> **Note on opType:** After creating the subscriber via WebConsole, retrieve the derived OPc value from MongoDB and use that in the UERANSIM config with `opType: 'OPC'`:
-> ```bash
-> mongosh free5gc --eval "db['subscriptionData.authenticationData.authenticationSubscription'].find().pretty()"
-> ```
-> Use the `encOpcKey` value returned.
+Use the `encOpcKey` value retrieved from MongoDB in Part 4.
 
 ---
 
-## Part 6 — Running the Simulation
+## Part 6: Running the Simulation
 
-### Terminal layout required: 1 on free5GC VM, 3 on UERANSIM VM
+Four terminals are needed in total. One on the free5GC VM and three on the UERANSIM VM.
 
-**free5GC VM — Terminal 1:**
+**free5GC VM:**
 
 ```bash
 sudo ~/free5gc/reload_host_config.sh enp0s3
@@ -432,55 +442,58 @@ cd ~/free5gc
 ./run.sh
 ```
 
-Wait for output to stabilise (all NF registration complete, UPF heartbeat appearing).
+Wait for the output to stabilise. The UPF heartbeat lines appearing every 10 seconds indicate everything is up.
 
-**UERANSIM VM — Terminal 1 (gNB):**
+**UERANSIM VM, Terminal 1 (gNB):**
 
 ```bash
 cd ~/UERANSIM
 build/nr-gnb -c config/free5gc-gnb.yaml
 ```
 
-Expected output:
-```
-[sctp] [info] SCTP connection established (192.168.56.101:38412)
-[ngap] [info] NG Setup procedure is successful
-```
+Wait for `NG Setup procedure is successful` before starting the UE.
 
-> Screenshot: `img/gnb-connected.png`
-
-**UERANSIM VM — Terminal 2 (UE):**
+**UERANSIM VM, Terminal 2 (UE):**
 
 ```bash
 cd ~/UERANSIM
 sudo build/nr-ue -c config/free5gc-ue.yaml
 ```
 
-Expected output:
-```
-[nas] [info] UE switches to state [MM-REGISTERED/NORMAL-SERVICE]
-[nas] [info] Initial Registration is successful
-[nas] [info] PDU Session establishment is successful PSI[1]
-[app] [info] Connection setup for PDU session[1] is successful, TUN interface[uesimtun0, 10.60.0.1] is up.
-```
+Wait for `uesimtun0 is up`.
 
-> Screenshot: `img/ue-registered.png`
-
-**UERANSIM VM — Terminal 3 (Connectivity Test):**
+**UERANSIM VM, Terminal 3 (route and test):**
 
 ```bash
-ping -I uesimtun0 google.com
+sudo ip route add default dev uesimtun0 metric 1
+ping google.com
 ```
 
-Successful replies confirm end-to-end GTP-U tunnel operation: UE → gNB → AMF/SMF/UPF → internet.
+Successful replies confirm end-to-end GTP-U tunnel operation from simulated UE through the 5G Core to the internet.
 
-> Screenshot: `img/ping-success.png`
+---
+
+## Session Startup Reference
+
+After rebooting the free5GC VM, run this before anything else:
+
+```bash
+sudo ~/free5gc/reload_host_config.sh enp0s3
+```
+
+After the UE registers and `uesimtun0` is up, run this on the UERANSIM VM before testing:
+
+```bash
+sudo ip route add default dev uesimtun0 metric 1
+```
+
+These two steps are required every session. Everything else persists across reboots.
 
 ---
 
 ## Troubleshooting
 
-These are real errors encountered during this implementation, documented with their root causes.
+All errors below were encountered during this implementation and are documented with their actual root causes.
 
 ### SCTP Connection Refused on gNB Start
 
@@ -488,9 +501,7 @@ These are real errors encountered during this implementation, documented with th
 [sctp] [error] Connecting to 192.168.56.101:38412 failed. SCTP could not connect: Connection refused
 ```
 
-**Cause:** AMF is not listening on the host-only IP. Either `amfcfg.yaml` still has `127.0.0.1` in `ngapIpList`, or free5GC is not running.
-
-**Resolution:** Verify `amfcfg.yaml` shows `192.168.56.101` under `ngapIpList`. If free5GC stopped, check for stale processes:
+The AMF is not listening on the host-only IP. Either `amfcfg.yaml` still contains `127.0.0.1` in `ngapIpList`, or free5GC is not running. If free5GC stopped unexpectedly, clear stale processes and restart:
 
 ```bash
 sudo killall -9 amf smf upf pcf udm udr ausf nssf nef chf nrf
@@ -498,19 +509,13 @@ sudo ~/free5gc/reload_host_config.sh enp0s3
 cd ~/free5gc && ./run.sh
 ```
 
----
-
-### AMF Fails to Start: `cannot assign requested address`
+### AMF Fails to Start
 
 ```
 [ERRO][AMF][Ngap] Failed to listen: cannot assign requested address
 ```
 
-**Cause:** `ngapIpList` in `amfcfg.yaml` contains an IP that does not exist on this machine — for example the UERANSIM IP `192.168.56.102` instead of `192.168.56.101`.
-
-**Resolution:** Open `amfcfg.yaml` and confirm `ngapIpList` contains the free5GC VM's IP, not the UERANSIM VM's IP.
-
----
+The `ngapIpList` in `amfcfg.yaml` contains an IP that does not exist on this machine. This happens when the UERANSIM IP `192.168.56.102` is mistakenly entered instead of `192.168.56.101`.
 
 ### SMF Cannot Reach UPF
 
@@ -518,11 +523,7 @@ cd ~/free5gc && ./run.sh
 [WARN][SMF][Main] Failed to setup an association with UPF[[127.0.0.8]]
 ```
 
-**Cause:** `smfcfg.yaml` still references the default `127.0.0.8` loopback address for the UPF endpoint.
-
-**Resolution:** Open `smfcfg.yaml` and update all `127.0.0.8` references under `interfaces.N3.endpoints` to `192.168.56.101`. Use `Ctrl+W` in nano to search.
-
----
+The `smfcfg.yaml` file still has the default `127.0.0.8` loopback address. Open the file and use `Ctrl+W` in nano to search for all occurrences and replace them with `192.168.56.101`.
 
 ### Authentication Failure: MAC Mismatch
 
@@ -531,24 +532,13 @@ cd ~/free5gc && ./run.sh
 [nas] [error] Authentication Reject received
 ```
 
-**Cause (most common):** `Operator Code Type` was left as `OPc` in the WebConsole when creating the subscriber, but UERANSIM's `free5gc-ue.yaml` is configured with the raw `OP` value. The cryptographic derivation does not match.
-
-**Resolution:** Retrieve the derived OPc value that free5GC stored internally:
+The most common cause is that Operator Code Type was left as OPc in the WebConsole but UERANSIM is configured with the raw OP value. Retrieve the derived OPc from MongoDB and use that in `free5gc-ue.yaml` with `opType: 'OPC'`:
 
 ```bash
 mongosh free5gc --eval "db['subscriptionData.authenticationData.authenticationSubscription'].find().pretty()"
 ```
 
-Use the `encOpcKey` value in `free5gc-ue.yaml`:
-
-```yaml
-op: '<encOpcKey value from MongoDB>'
-opType: 'OPC'
-```
-
-**Cause (secondary):** SQN desynchronisation from previous failed attempts. In the WebConsole, edit the subscriber and reset the SQN field to `000000000000`.
-
----
+A secondary cause is SQN desynchronisation from previous failed attempts. Open the subscriber in the WebConsole and reset the SQN field to `000000000000`.
 
 ### Port Already in Use on Restart
 
@@ -556,29 +546,29 @@ opType: 'OPC'
 [ERRO][CHF][SBI] SBI server error: listen tcp 127.0.0.113:8000: bind: address already in use
 ```
 
-**Cause:** Previous free5GC processes did not terminate cleanly and are still holding ports.
-
-**Resolution:**
+Previous free5GC processes did not terminate cleanly. Kill them and free the port:
 
 ```bash
 sudo killall -9 amf smf upf pcf udm udr ausf nssf nef chf nrf webconsole
 sudo fuser -k 8000/tcp
 ```
 
----
+### Ping Through uesimtun0 Returns 100% Packet Loss
 
-### uesimtun0 Not Appearing After UE Registration
-
-If the UE shows `MM-REGISTERED` but no `uesimtun0` interface appears, check that the UPF `ifList` address in `upfcfg.yaml` is `192.168.56.101` and that the gtp5g kernel module loaded correctly:
+The tunnel interface is up but traffic is not flowing end-to-end. This is almost always caused by the gtp5g kernel module being in a bad state. The fix is to reload it cleanly, then restart free5GC:
 
 ```bash
-lsmod | grep gtp5g
+sudo killall -9 amf smf upf pcf udm udr ausf nssf nef chf nrf
+sudo rmmod gtp5g
+cd ~/gtp5g && sudo make install && sudo modprobe gtp5g
+sudo ~/free5gc/reload_host_config.sh enp0s3
+cd ~/free5gc && ./run.sh
 ```
 
-If not loaded:
+After restarting, add the route on the UERANSIM VM once the UE registers:
 
 ```bash
-cd ~/gtp5g && sudo make install
+sudo ip route add default dev uesimtun0 metric 1
 ```
 
 ---
@@ -589,19 +579,18 @@ cd ~/gtp5g && sudo make install
 .
 ├── README.md
 ├── img/
-│   ├── architecture-diagram.png
-│   ├── gnb-connected.png        # NG Setup successful
-│   ├── ue-registered.png        # PDU session established, uesimtun0 up
-│   └── ping-success.png         # ping -I uesimtun0 google.com
+│   ├── gnb-connected.png
+│   ├── ue-registered.png
+│   └── ping-success.png
 └── config/
-    ├── amfcfg.yaml              # Modified AMF config
-    ├── smfcfg.yaml              # Modified SMF config
-    ├── upfcfg.yaml              # Modified UPF config
-    ├── free5gc-gnb.yaml         # Modified gNB config
-    └── free5gc-ue.yaml          # Modified UE config
+    ├── amfcfg.yaml
+    ├── smfcfg.yaml
+    ├── upfcfg.yaml
+    ├── free5gc-gnb.yaml
+    └── free5gc-ue.yaml
 ```
 
-> The `config/` folder contains only the modified versions of each file with inline comments marking every change from the default. These are provided as reference — do not copy them directly without reading through the configuration sections above.
+The `config` folder contains only the modified versions of each file with inline comments on every changed line. They are provided as reference. Do not copy them directly without reading through the configuration sections above, as IP addresses may differ depending on your setup.
 
 ---
 
@@ -611,13 +600,9 @@ cd ~/gtp5g && sudo make install
 - [free5GC GitHub Repository](https://github.com/free5gc/free5gc)
 - [UERANSIM GitHub Repository](https://github.com/aligungr/UERANSIM)
 - [gtp5g Kernel Module](https://github.com/free5gc/gtp5g)
-- 3GPP TS 23.501 — System architecture for the 5G System
-- 3GPP TS 33.501 — Security architecture and procedures for 5G System
+- 3GPP TS 23.501: System architecture for the 5G System
+- 3GPP TS 33.501: Security architecture and procedures for 5G System
 
 ---
 
-## Acknowledgements
-
-Built against free5GC v4.2.2 and UERANSIM v3.2.6 on Ubuntu 22.04 LTS. Verified on VirtualBox 7.x running on a Windows host.
-
-This repository was created because the existing documentation, while technically accurate, does not cover the complete path from bare VM to working simulation in a single coherent guide. The troubleshooting section documents real failures from this implementation rather than theoretical edge cases.
+Built against free5GC v4.2.2 and UERANSIM v3.2.6 on Ubuntu 22.04 LTS. Verified on VirtualBox 7.x running on a Windows host. The troubleshooting section documents real failures from this implementation rather than theoretical edge cases.
