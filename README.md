@@ -20,15 +20,15 @@ These are the actual outputs from this implementation.
 
 **gNB connected to free5GC core:**
 
-![gNB Connected](img/gnb-connected.png)
+![gNB Connected](img/gnb-connected.PNG)
 
 **UE registered and GTP tunnel up:**
 
-![UE Registered](img/ue-registered.png)
+![UE Registered](img/ue-registered.PNG)
 
 **End-to-end ping through the simulated 5G network:**
 
-![Ping Success](img/ping-success.png)
+![Ping Success](img/ping-success.PNG)
 
 ---
 
