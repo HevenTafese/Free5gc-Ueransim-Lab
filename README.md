@@ -577,12 +577,6 @@ sudo ip route add default dev uesimtun0 metric 1
 │   ├── gnb-connected.png
 │   ├── ue-registered.png
 │   └── ping-success.png
-└── config/
-    ├── amfcfg.yaml
-    ├── smfcfg.yaml
-    ├── upfcfg.yaml
-    ├── free5gc-gnb.yaml
-    └── free5gc-ue.yaml
 ```
 
 The `config` folder contains only the modified versions of each file with inline comments on every changed line. They are provided as reference. Do not copy them directly without reading through the configuration sections above, as IP addresses may differ depending on your setup.
